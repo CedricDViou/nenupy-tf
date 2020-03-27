@@ -260,7 +260,7 @@ class Lane(object):
 
 
     @property
-    def frequencies(self):
+    def center_frequencies(self):
         """ Array of frequencies in MHz corresponding
             to the selected beam.
         """
@@ -272,7 +272,8 @@ class Lane(object):
     def freq_min(self):
         """ Minimal observed frequency in MHz
         """
-        return np.min(self.frequencies)
+        df = (1.0 / 5.12e-6) * 1e-6
+        return np.min(self.center_frequencies) - df/2
 
 
     @property
@@ -280,7 +281,7 @@ class Lane(object):
         """ Maximal observed frequency in MHz
         """
         df = (1.0 / 5.12e-6) * 1e-6
-        return np.max(self.frequencies) + df
+        return np.max(self.center_frequencies) + df/2
 
 
     @property
@@ -591,7 +592,7 @@ class Lane(object):
                 Dictionnary of lanes <-> block index
         """
         idx = idx_of(
-            array=self.frequencies,
+            array=self.center_frequencies,
             value=frequency,
             order=order
             )
@@ -639,9 +640,10 @@ class Lane(object):
         beam_shift = np.searchsorted(self._beams, self.beam)
         id_max -= beam_shift
         id_min -= beam_shift
-        f = np.tile(np.arange(self.fftlen, dtype='float64'), (id_max - id_min))
+        f = np.arange(self.fftlen, dtype='float64') - self.fftlen/2
         f *= self.df
-        f += np.repeat(self.frequencies[id_min:id_max], self.fftlen)
+        f = np.tile(f , (id_max - id_min))
+        f += np.repeat(self.center_frequencies[id_min:id_max], self.fftlen)
         return f
 
 
