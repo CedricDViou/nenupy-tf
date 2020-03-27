@@ -2,6 +2,15 @@
 # -*- coding: utf-8 -*-
 
 
+"""
+    ****
+    Lane
+    ****
+
+    Test de docstring
+"""
+
+
 __author__ = ['Alan Loh']
 __copyright__ = 'Copyright 2019, nenupytf'
 __credits__ = ['Alan Loh']
@@ -9,8 +18,7 @@ __maintainer__ = 'Alan Loh'
 __email__ = 'alan.loh@obspm.fr'
 __status__ = 'Production'
 __all__ = [
-    'Lane',
-    'LaneSpectrum'
+    'Lane'
     ]
 
 
@@ -19,6 +27,7 @@ import os.path as path
 from os import getpid
 import psutil
 import numpy as np
+import warnings
 
 from nenupytf.other import header_struct, max_bsn
 from nenupytf.stokes import NenuStokes, SpecData
@@ -158,13 +167,19 @@ class Lane(object):
                 t1_unix = t[1]
 
             if t0_unix < self.time_min.unix:
-                raise ValueError(
-                    'Out of range time selection.'
-                    )
+                warnings.warn(
+                    'Out of range time selection, default values adopted.'
+                )
+                t0_unix = self.time_min.unix
             if t1_unix > self.time_max.unix:
+                warnings.warn(
+                    'Out of range time selection, default values adopted.'
+                )
+                t1_unix = self.time_max.unix
+            if t1_unix < t0_unix:
                 raise ValueError(
-                    'Out of range time selection.'
-                    )
+                    'Stop time < Start time'
+                )
             t = [t0_unix, t1_unix]
 
         self._time = t
@@ -200,13 +215,19 @@ class Lane(object):
                     '`freq` should be a length 2 array.'
                     )
             if f[0] < self.freq_min:
-                raise ValueError(
-                    'Out of range time selection.'
-                    )
+                warnings.warn(
+                    'Out of range freq selection, default values adopted.'
+                )
+                f[0] = self.freq_min
             if f[1] > self.freq_max:
+                warnings.warn(
+                    'Out of range freq selection, default values adopted.'
+                )
+                f[1] = self.freq_max
+            if f[1] < f[0]:
                 raise ValueError(
-                    'Out of range time selection.'
-                    )
+                    'Max freq < Min freq'
+                )
 
         self._freq = f
         return
@@ -282,7 +303,7 @@ class Lane(object):
 
     # --------------------------------------------------------- #
     # ------------------------ Methods ------------------------ #
-    def select(self, stokes='I', time=None, freq=None, beam=None):
+    def select(self, stokes='I', time=None, freq=None, beam=None, bp_corr=True):
         """ Select data within a lane file.
             If the selection appears to be too big regarding
             available memory, an error should be raised.
@@ -309,6 +330,12 @@ class Lane(object):
                 Beam index, refer to observation setup to see the
                 details of the different observed beams.
                 Default: `None` consider index 0.
+            bp_corr : bool or int, optional, default: `True
+                Compute the bandpass correction.
+                `False`: do not compute any correction
+                `True``: compute the correction with Kaiser coefficients
+                `'median'`: compute a medianed correction
+                `'fft'`: correct the bandpass using FFT
 
             Returns
             -------
@@ -319,6 +346,15 @@ class Lane(object):
         self.beam = beam
         self.time = time
         self.freq = freq
+
+        if self.time[1] - self.time[0] < self.dt:
+            raise ValueError(
+                'Time interval selected < {} sec'.format(self.dt)
+            )
+        if self.freq[1] - self.freq[0] < self.df:
+            raise ValueError(
+                'Frequency interval selected < {} MHz'.format(self.df)
+            )
         
         tmin_idx = self._t2bidx(
             time=self.time[0],
@@ -347,35 +383,31 @@ class Lane(object):
             id_max=tmax_idx + 1
             )
         t_mask = (times >= to_unix(self.time[0])) &\
-            (times <= to_unix(self.time[1]))
+            (times < to_unix(self.time[1]))
         
         freqs = self._get_freq(
             id_min=fmin_idx,
             id_max=fmax_idx + 1
             )
         f_mask = (freqs >= self.freq[0]) &\
-            (freqs <= self.freq[1])
+            (freqs < self.freq[1])
         
         spectrum = NenuStokes(
             data=self.memdata['data'],
             stokes=stokes,
             nffte=self.nffte,
-            fftlen=self.fftlen
+            fftlen=self.fftlen,
+            bp_corr=bp_corr
             )[
             tmin_idx:tmax_idx + 1,
             fmin_idx:fmax_idx + 1,
             ]
 
-        # return (
-        #     times[t_mask],
-        #     freqs[f_mask],
-        #     spectrum[t_mask, :][:, f_mask]
-        #     )
-
         return SpecData(
             data=spectrum[t_mask, :][:, f_mask],
             time=times[t_mask],
-            freq=freqs[f_mask]
+            freq=freqs[f_mask],
+            stokes=stokes
             )
 
 
@@ -458,7 +490,8 @@ class Lane(object):
         return SpecData(
             data=averaged_data,
             time=to_unix(averaged_time),
-            freq=averaged_freq
+            freq=averaged_freq,
+            stokes=stokes
             )
 
 
@@ -603,10 +636,12 @@ class Lane(object):
             frequency : `np.ndarray`
                 Array of frequencies in MHz
         """
-        n_freqs = (id_max - id_min) * self.fftlen
-        f = np.arange(n_freqs, dtype='float64')
+        beam_shift = np.searchsorted(self._beams, self.beam)
+        id_max -= beam_shift
+        id_min -= beam_shift
+        f = np.tile(np.arange(self.fftlen, dtype='float64'), (id_max - id_min))
         f *= self.df
-        f += self.frequencies[id_min]
+        f += np.repeat(self.frequencies[id_min:id_max], self.fftlen)
         return f
 
 
@@ -628,18 +663,5 @@ class Lane(object):
                 )
         return
 # ============================================================= #
-
-        
-# ============================================================= #
-# ----------------------- LaneSpectrum ------------------------ #
-# ============================================================= #
-class LaneSpectrum(Lane):
-    """
-    """
-
-    def __init__(self, spectrum):
-        super().__init__(spectrum=spectrum)
-# ============================================================= #
-
 
 

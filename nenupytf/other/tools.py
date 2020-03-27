@@ -2,6 +2,13 @@
 # -*- coding: utf-8 -*-
 
 
+"""
+    *****
+    tools
+    *****
+"""
+
+
 __author__ = ['Alan Loh']
 __copyright__ = 'Copyright 2019, nenupytf'
 __credits__ = ['Alan Loh']
@@ -64,6 +71,8 @@ def idx_of(array, value, order='low'):
 def to_unix(time):
     """
     """
+    if isinstance(time, str):
+        time = Time(time, precision=7).unix
     time = Time(time, format='unix', precision=7) 
     return time
 

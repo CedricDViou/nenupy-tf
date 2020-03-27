@@ -2,6 +2,13 @@
 # -*- coding: utf-8 -*-
 
 
+"""
+    **********
+    NenuStokes
+    **********
+"""
+
+
 __author__ = ['Alan Loh']
 __copyright__ = 'Copyright 2019, nenupytf'
 __credits__ = ['Alan Loh']
@@ -15,12 +22,14 @@ __all__ = [
     'Stokes_Q',
     'Stokes_U',
     'Stokes_V',
+    'CrossXX',
+    'CrossYY'
     ]
 
 
 import numpy as np
 
-from nenupytf.other import allowed_stokes
+from nenupytf.other import allowed_stokes, compute_bandpass
 
 
 # ============================================================= #
@@ -29,7 +38,7 @@ from nenupytf.other import allowed_stokes
 class NenuStokes(object):
     """
     """
-    def __init__(self, data, stokes, nffte, fftlen):
+    def __init__(self, data, stokes, nffte, fftlen, bp_corr=True):
         self.data = data
         self.stokes = stokes
         self.nffte = nffte
@@ -37,10 +46,12 @@ class NenuStokes(object):
         self.ntblocks = None
         self.nfblocks = None
         self.sel_slice = None
+        self.bp_corr = bp_corr
 
 
     def __getitem__(self, slice_val):
         self.sel_slice = slice_val
+        
         if self.stokes == 'i':
             data = Stokes_I(self.data)[slice_val]
         elif self.stokes == 'q':
@@ -53,8 +64,23 @@ class NenuStokes(object):
             stokes_i = Stokes_I(self.data)[slice_val]
             stokes_v = Stokes_V(self.data)[slice_val]
             data = stokes_v/stokes_i
+        elif self.stokes == 'xx':
+            data = CrossXX(self.data)[slice_val]
+        elif self.stokes == 'yy':
+            data = CrossYY(self.data)[slice_val]
+        elif self.stokes == 'argxy':
+            re = Stokes_U(self.data)[slice_val]
+            im = Stokes_V(self.data)[slice_val]
+            data = np.abs( re + 1j * im)
+        elif self.stokes == 'phasexy':
+            re = Stokes_U(self.data)[slice_val]
+            im = Stokes_V(self.data)[slice_val]
+            data = np.angle( re + 1j * im)
 
-        return self.correct(data)
+        return self.correct(
+            data=data,
+            bandpass=self.bp_corr
+            )
 
 
     @property
@@ -85,39 +111,71 @@ class NenuStokes(object):
             raise ValueError('Wrong Stokes parameter.')
 
 
-    def correct(self, data):
+    def correct(self, data, bandpass=True):
         """ Transfom the data into a 2D array of time-frquency
             Invert the halves of each beamlet
             Correct for bandpass
         """
         # Make a 2D array
         data = np.swapaxes(data, 1, 2)
-
         n_times = self.ntblocks * self.nffte
         n_freqs = self.nfblocks * self.fftlen
-        data = data.reshape((n_times, n_freqs))
 
         # Invert the halves of the beamlet
         if self.fftlen % 2. != 0.0:
             raise ValueError('Problem with fftlen value!')
-        f_idx = np.arange(data.shape[1])
-        tmp_shape = (
-            int(data.shape[1]/self.fftlen),
-            2,
-            int(self.fftlen/2)
+        data = data.reshape(
+            (
+                n_times,
+                int(n_freqs/self.fftlen),
+                2,
+                int(self.fftlen/2)
             )
-        f_idx = f_idx.reshape(tmp_shape)[:, ::-1, :].ravel()
-        data = data[:, f_idx]
+        )
+        data = data[:, :, ::-1, :].reshape((n_times, n_freqs))
 
         # Bandpass correction
-        spectrum = np.median(data, axis=0)
-        folded = spectrum.reshape(
-            (int(spectrum.size / self.fftlen), self.fftlen)
-            )
-        broadband = np.median(folded, axis=1)
-        broadband = np.repeat(broadband, self.fftlen)
-        
-        return data / spectrum * broadband
+        if bandpass:
+
+            if bandpass == 'median': 
+                spectrum = np.median(data, axis=0)
+                folded = spectrum.reshape(
+                    (int(spectrum.size / self.fftlen), self.fftlen)
+                    )
+                broadband = np.median(folded, axis=1)
+                broadband = np.repeat(broadband, self.fftlen)
+                return data / spectrum * broadband
+
+            elif bandpass == 'fft':
+                from scipy.signal import find_peaks
+                bp_fft = np.fft.fft(data)
+                # Find peaks
+                avg_fft = np.mean(np.abs(bp_fft), axis=0)
+                p_idx, meta = find_peaks(
+                    x=avg_fft,
+                    height=np.median(avg_fft) * 2.
+                )
+                # Put to zero peaks and neighbouring slices
+                p_idx = np.concatenate(
+                    (p_idx, p_idx + 1, p_idx - 1)
+                )
+                bp_fft[:, p_idx] = 0.
+                return np.abs(np.fft.ifft(bp_fft))
+
+            else:
+                bp = compute_bandpass(self.fftlen)
+                data = data.reshape(
+                    (
+                        n_times,
+                        int(n_freqs/bp.size),
+                        bp.size
+                    )
+                )
+                data *= bp[np.newaxis, np.newaxis]
+                return data.reshape((n_times, n_freqs))
+
+        else:
+            return data
 # ============================================================= #
 
 
@@ -231,5 +289,39 @@ class Stokes_V(LaneDSpec):
         selection = self.fft1[slice_val]
         selection = selection[..., 1] * (-2)
         return selection
+# ============================================================= #
+
+
+# ============================================================= #
+# -------------------------- CrossXX -------------------------- #
+# ============================================================= #
+class CrossXX(LaneDSpec):
+    """
+    """
+
+    def __init__(self, data):
+        super().__init__(data=data)
+
+
+    def __getitem__(self, slice_val):
+        selection = self.fft0[slice_val]
+        return selection[..., 0] * 2
+# ============================================================= #
+
+
+# ============================================================= #
+# -------------------------- CrossYY -------------------------- #
+# ============================================================= #
+class CrossYY(LaneDSpec):
+    """
+    """
+
+    def __init__(self, data):
+        super().__init__(data=data)
+
+
+    def __getitem__(self, slice_val):
+        selection = self.fft0[slice_val]
+        return selection[..., 1] * 2
 # ============================================================= #
 

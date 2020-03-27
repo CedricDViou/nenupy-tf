@@ -2,6 +2,13 @@
 
 [![nenupy](https://img.shields.io/pypi/v/nenupytf.svg)](
     https://pypi.python.org/pypi/nenupytf)
+[![PyPI download month](https://img.shields.io/pypi/dm/nenupytf.svg)](
+    https://pypi.python.org/pypi/nenupytf/)
+[![PyPI pyversions](https://img.shields.io/pypi/pyversions/nenupytf.svg)](
+    https://pypi.python.org/pypi/nenupytf/)
+[![doc](https://readthedocs.org/projects/pip/badge/?version=latest&style=flat)](
+    https://nenupytf.readthedocs.io/en/latest/)
+
 
 <p align="center">
 <img src="./Logo-NenuFAR-noir.svg" width="20%">
